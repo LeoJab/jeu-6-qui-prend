@@ -637,6 +637,7 @@ function startGame() {
   LS.set('sqp-settings', S.settings);
   for (const p of S.players) { p.score = 0; p.roundPts = 0; }
   S.round = 1; S.turn = 1; S.log = []; S.anim = null; S.summary = null;
+  S.gameId = ((Net.code || 'SALLE') + '-' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)).replace(/[^A-Za-z0-9\-_.:]/g, '').slice(0, 64);
   deal(); S.phase = 'pick';
   addLog(`🎬 La partie commence ! Objectif : ne pas atteindre ${S.settings.target} 🐮`, 'big');
   setDeadline(S.settings.timer ? S.settings.timer * 1000 : null);
@@ -886,9 +887,10 @@ function showReaction(id, e) {
 function show(id) { for (const s of document.querySelectorAll('.screen')) s.classList.toggle('on', s.id === id); if (id !== 'game') $('#vignette').dataset.n = 0; }
 function avatarHTML(p, cls = '') {
   const col = colorFor(p.id);
-  if (p.avatar) return `<span class="av ${cls}" style="background:${col}"><img src="${esc(p.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
+  const cam = Net.mode === 'hub' && !p.bot ? ` data-chadgang-id="${esc(p.id)}"` : '';
+  if (p.avatar) return `<span class="av ${cls}"${cam} style="background:${col}"><img src="${esc(p.avatar)}" alt="" referrerpolicy="no-referrer" onerror="this.remove()"></span>`;
   const ch = p.bot ? '🤖' : esc((p.name || '?').trim().charAt(0).toUpperCase() || '?');
-  return `<span class="av ${cls}" style="background:${col}">${ch}</span>`;
+  return `<span class="av ${cls}"${cam} style="background:${col}">${ch}</span>`;
 }
 function cardHTML(c, cls = '') { const h = heads(c); return `<div class="card h${h} ${cls}" data-c="${c}"><div class="hd">${BULL.repeat(h)}</div><div class="n">${c}</div></div>`; }
 const backHTML = () => `<div class="cback">${BULL}</div>`;
@@ -972,6 +974,18 @@ function renderLobby(s) {
   </div>`;
 }
 
+function reportResult(s) {
+  if (Net.mode !== 'hub' || s.phase !== 'over' || !s.gameId) return;
+  const me = pl(s, Net.me); if (!me || me.bot) return;
+  if (reportResult.done === s.gameId) return; reportResult.done = s.gameId;
+  const min = Math.min(...s.players.map(p => p.score));
+  try {
+    if (window.ChadGang && ChadGang.finPartie) {
+      const r = ChadGang.finPartie({ gagne: me.score === min, partie: s.gameId, score: me.score });
+      if (r && r.catch) r.catch(() => {});
+    }
+  } catch (e) {}
+}
 function phaseView(s) {
   const key = `${s.phase}|${s.round}|${s.turn}`;
   if (key === lastPhaseKey) return null;
@@ -986,6 +1000,7 @@ function render() {
     show('lobby'); renderLobby(s); if ($('#overlay').dataset.kind !== 'rules') closeOverlay(); lastPhaseKey = 'lobby'; firstRender = false; return;
   }
   show('game');
+  reportResult(s);
   if (animating) { renderScores(s, V); return; }
   const pv = phaseView(s);
   if (pv && s.phase === 'pick') { sel = null; }
